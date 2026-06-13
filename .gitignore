@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Data
+data/images/
+data/labels.csv
+
+# Model checkpoints
+*.pt
+
+# Training artifacts
+metrics.csv
+per_class.csv
+plot.png
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+*.swp
+*.swo
