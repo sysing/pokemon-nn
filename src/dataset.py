@@ -1,5 +1,6 @@
 """
 PyTorch Dataset for Pokemon card type classification.
+v0.3: 4-channel input [R, G, B, Gray] for stacked color + grayscale.
 """
 
 import csv
@@ -19,16 +20,24 @@ IDX_TO_TYPE = {v: k for k, v in TYPE_TO_IDX.items()}
 NUM_CLASSES = 10
 
 
+def _stack_gray(tensor):
+    """Stack grayscale as 4th channel: [3, H, W] -> [4, H, W]."""
+    gray = 0.299 * tensor[0] + 0.587 * tensor[1] + 0.114 * tensor[2]
+    return torch.cat([tensor, gray.unsqueeze(0)], dim=0)
+
+
 def get_train_transform():
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=5),
         transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
-        transforms.RandomGrayscale(p=0.3),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225]),
+        transforms.Lambda(_stack_gray),
+        transforms.Normalize(mean=[0, 0, 0, 0.5],
+                             std=[1, 1, 1, 0.225]),
     ])
 
 
@@ -38,6 +47,9 @@ def get_val_transform():
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225]),
+        transforms.Lambda(_stack_gray),
+        transforms.Normalize(mean=[0, 0, 0, 0.5],
+                             std=[1, 1, 1, 0.225]),
     ])
 
 
