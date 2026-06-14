@@ -16,6 +16,7 @@ data/labels.csv
 metrics.csv
 per_class.csv
 plot.png
+runs/
 
 # IDE
 .vscode/

@@ -25,6 +25,7 @@ def get_train_transform():
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=5),
         transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
+        transforms.RandomGrayscale(p=0.3),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225]),

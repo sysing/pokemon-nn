@@ -98,9 +98,12 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--run", default="v0.2", help="Run name for saving artifacts")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
+    run_dir = project_root / "runs" / args.run
+    run_dir.mkdir(parents=True, exist_ok=True)
     data_dir = str(project_root / args.data_dir)
 
     device = get_device()
@@ -124,13 +127,13 @@ def main():
     patience_counter = 0
     patience = 6
 
-    metrics_path = project_root / "metrics.csv"
+    metrics_path = run_dir / "metrics.csv"
     with open(metrics_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["epoch", "total_epochs", "train_loss", "train_acc",
                          "val_loss", "val_acc", "lr", "elapsed_s"])
 
-    per_class_path = project_root / "per_class.csv"
+    per_class_path = run_dir / "per_class.csv"
     with open(per_class_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["epoch"] + [IDX_TO_TYPE[i] for i in range(NUM_CLASSES)])
@@ -170,7 +173,7 @@ def main():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_counter = 0
-            torch.save(model.state_dict(), project_root / "best_model.pt")
+            torch.save(model.state_dict(), run_dir / "model.pt")
         else:
             patience_counter += 1
             if patience_counter >= patience:
@@ -179,7 +182,7 @@ def main():
 
     print(f"\nBest val loss: {best_val_loss:.4f}")
     print("\nPer-class accuracy on best model:")
-    model.load_state_dict(torch.load(project_root / "best_model.pt"))
+    model.load_state_dict(torch.load(run_dir / "model.pt"))
     _, _, class_correct, class_total = validate(model, val_loader, criterion, device)
     for i in range(NUM_CLASSES):
         if class_total[i] > 0:
