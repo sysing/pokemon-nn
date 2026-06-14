@@ -101,6 +101,10 @@ def main():
     parser.add_argument("--run", default="v0.2", help="Run name for saving artifacts")
     args = parser.parse_args()
 
+    torch.manual_seed(42)
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(42)
+
     project_root = Path(__file__).resolve().parent.parent
     run_dir = project_root / "runs" / args.run
     run_dir.mkdir(parents=True, exist_ok=True)
