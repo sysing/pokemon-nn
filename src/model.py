@@ -1,6 +1,9 @@
 """
 Small CNN for Pokemon card type classification.
 ~600K parameters — fast training on M4 MPS.
+
+Input:  [batch, 4, 224, 224]  (R, G, B, Luminance per pixel)
+Output: [batch, 10]           (logits for 10 Pokemon types)
 """
 
 import torch.nn as nn

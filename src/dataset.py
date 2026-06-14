@@ -1,6 +1,11 @@
 """
 PyTorch Dataset for Pokemon card type classification.
-v0.3: 4-channel input [R, G, B, Gray] for stacked color + grayscale.
+
+Input tensor: [4, 224, 224]
+  - Channel 0: Red
+  - Channel 1: Green
+  - Channel 2: Blue
+  - Channel 3: Luminance (0.299R + 0.587G + 0.114B per pixel)
 """
 
 import csv
