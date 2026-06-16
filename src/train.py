@@ -16,8 +16,10 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, random_split
 
-from dataset import IDX_TO_TYPE, NUM_CLASSES, create_dataloaders
+from dataset import IDX_TO_TYPE, NUM_CLASSES, TYPE_TO_IDX, create_dataloaders, PokemonDataset
+from dataset import get_train_transform, get_val_transform
 from model import PokemonTypeCNN
 
 
@@ -38,6 +40,40 @@ def compute_class_weights(label_counts):
         else:
             weights.append(0.0)
     return torch.tensor(weights, dtype=torch.float32)
+
+
+def create_filtered_loaders(data_dir, classes, batch_size):
+    from torch.utils.data import DataLoader
+
+    full_dataset = PokemonDataset(data_dir, transform=get_train_transform())
+    target_idxs = [TYPE_TO_IDX[c] for c in classes]
+
+    filtered_samples = [(p, target_idxs.index(l)) for p, l in full_dataset.samples
+                        if l in target_idxs]
+    filtered_dataset = PokemonDataset.__new__(PokemonDataset)
+    filtered_dataset.data_dir = full_dataset.data_dir
+    filtered_dataset.samples = filtered_samples
+    filtered_dataset.transform = get_train_transform()
+
+    val_size = int(len(filtered_dataset) * 0.2)
+    train_size = len(filtered_dataset) - val_size
+
+    train_ds, val_ds = random_split(
+        filtered_dataset, [train_size, val_size],
+        generator=torch.Generator().manual_seed(42),
+    )
+    val_ds.transform = get_val_transform()
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+                              num_workers=0, pin_memory=False)
+    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                            num_workers=0, pin_memory=False)
+
+    label_counts = [0] * len(classes)
+    for _, label in filtered_samples:
+        label_counts[label] += 1
+
+    return train_loader, val_loader, label_counts
 
 
 def train_epoch(model, loader, criterion, optimizer, device):
@@ -64,13 +100,13 @@ def train_epoch(model, loader, criterion, optimizer, device):
 
 
 @torch.no_grad()
-def validate(model, loader, criterion, device):
+def validate(model, loader, criterion, device, num_classes=NUM_CLASSES):
     model.eval()
     running_loss = 0.0
     correct = 0
     total = 0
-    class_correct = [0] * NUM_CLASSES
-    class_total = [0] * NUM_CLASSES
+    class_correct = [0] * num_classes
+    class_total = [0] * num_classes
 
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
@@ -99,6 +135,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--run", default="v0.2", help="Run name for saving artifacts")
+    parser.add_argument("--pretrain", type=str, nargs="*",
+                        help="Classes to pretrain on first (e.g. Colorless Metal)")
+    parser.add_argument("--pretrain-epochs", type=int, default=10)
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -123,7 +162,42 @@ def main():
     class_weights = compute_class_weights(label_counts).to(device)
 
     model = PokemonTypeCNN(num_classes=NUM_CLASSES).to(device)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    pretrain_classes = args.pretrain or []
+    if pretrain_classes:
+        print(f"\nPhase 1: Pretraining on {pretrain_classes} only")
+        print("-" * 40)
+
+        pt_train_loader, pt_val_loader, pt_counts = create_filtered_loaders(
+            data_dir, pretrain_classes, args.batch_size,
+        )
+        print(f"Pretrain samples: {sum(pt_counts)} ({dict(zip(pretrain_classes, pt_counts))})")
+
+        pt_model = PokemonTypeCNN(num_classes=len(pretrain_classes)).to(device)
+        pt_model.features.load_state_dict(model.features.state_dict())
+        pt_criterion = nn.CrossEntropyLoss()
+        pt_optimizer = AdamW(pt_model.parameters(), lr=args.lr, weight_decay=1e-4)
+
+        pt_best = float("inf")
+        for epoch in range(1, args.pretrain_epochs + 1):
+            train_loss, train_acc = train_epoch(pt_model, pt_train_loader, pt_criterion,
+                                                 pt_optimizer, device)
+            val_loss, val_acc, _, _ = validate(pt_model, pt_val_loader, pt_criterion,
+                                                device, num_classes=len(pretrain_classes))
+            print(f"  Pretrain epoch {epoch:2d}/{args.pretrain_epochs} | "
+                  f"train loss: {train_loss:.3f} acc: {train_acc:.3f} | "
+                  f"val loss: {val_loss:.3f} acc: {val_acc:.3f}")
+            if val_loss < pt_best:
+                pt_best = val_loss
+                torch.save(pt_model.state_dict(), run_dir / "pretrain_model.pt")
+
+        pt_model.load_state_dict(torch.load(run_dir / "pretrain_model.pt"))
+        model.features.load_state_dict(pt_model.features.state_dict())
+        print(f"  Pretrain done. Best val loss: {pt_best:.4f}\n")
+
+    print("Phase 2: Full training")
+    print("-" * 40)
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
 
