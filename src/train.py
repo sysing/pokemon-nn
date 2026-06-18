@@ -9,9 +9,11 @@ Usage:
 
 import argparse
 import csv
+import shutil
 import time
 from pathlib import Path
 
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
@@ -76,11 +78,72 @@ def create_filtered_loaders(data_dir, classes, batch_size):
     return train_loader, val_loader, label_counts
 
 
+def _get_param_layers(model):
+    """Yield (name, param) for layers with learnable weights (skip bias-only)."""
+    for name, param in model.named_parameters():
+        if param.requires_grad and "weight" in name:
+            yield name, param
+
+
+def compute_weight_stats(model):
+    """Return dict of {layer_name: {weight_norm, weight_mean, weight_std}}."""
+    stats = {}
+    for name, param in _get_param_layers(model):
+        w = param.data.float()
+        stats[name] = {
+            "weight_norm": w.norm(2).item(),
+            "weight_mean": w.mean().item(),
+            "weight_std": w.std().item(),
+        }
+    return stats
+
+
+def _setup_grad_hooks(model):
+    """Register backward hooks on parameters to accumulate grad norms across batches.
+    Returns a dict {name: accumulated_norm} that gets updated during backward().
+    Call reset_grad_hooks() before each epoch."""
+    accum = {}  # {name: [sum_sq_norm, count]}
+    handles = []
+
+    def _make_hook(name):
+        def hook(grad):
+            if grad is not None:
+                if name not in accum:
+                    accum[name] = [0.0, 0]
+                accum[name][0] += grad.float().norm(2).item() ** 2
+                accum[name][1] += 1
+        return hook
+
+    for name, param in _get_param_layers(model):
+        handle = param.register_hook(_make_hook(name))
+        handles.append(handle)
+
+    return accum, handles
+
+
+def _remove_grad_hooks(handles):
+    for h in handles:
+        h.remove()
+
+
+def compute_grad_stats(accum):
+    """Convert accumulated sums to avg per-batch norms."""
+    stats = {}
+    for name, (sum_sq, count) in accum.items():
+        if count > 0:
+            stats[name] = (sum_sq / count) ** 0.5
+        else:
+            stats[name] = 0.0
+    return stats
+
+
 def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
     correct = 0
     total = 0
+
+    accum, handles = _setup_grad_hooks(model)
 
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
@@ -96,7 +159,10 @@ def train_epoch(model, loader, criterion, optimizer, device):
         correct += preds.eq(labels).sum().item()
         total += labels.size(0)
 
-    return running_loss / total, correct / total
+    grad_stats = compute_grad_stats(accum)
+    _remove_grad_hooks(handles)
+
+    return running_loss / total, correct / total, grad_stats
 
 
 @torch.no_grad()
@@ -138,6 +204,10 @@ def main():
     parser.add_argument("--pretrain", type=str, nargs="*",
                         help="Classes to pretrain on first (e.g. Colorless Metal)")
     parser.add_argument("--pretrain-epochs", type=int, default=10)
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Resume from a run directory (e.g. runs/v0.5-rcrop)")
+    parser.add_argument("--resume-epochs", type=int, default=15,
+                        help="Additional epochs when resuming")
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -161,9 +231,33 @@ def main():
 
     class_weights = compute_class_weights(label_counts).to(device)
 
-    model = PokemonTypeCNN(num_classes=NUM_CLASSES).to(device)
+    # --- Resume handling ---
+    resume_from_epoch = 0
+    if args.resume:
+        resume_dir = Path(args.resume)
+        if not resume_dir.is_absolute():
+            resume_dir = project_root / args.resume
+        ckpt_path = resume_dir / "model.pt"
+        if not ckpt_path.exists():
+            print(f"Checkpoint not found: {ckpt_path}")
+            return
+        print(f"Resuming from {ckpt_path}")
+        # Find last completed epoch from metrics
+        resume_metrics = resume_dir / "metrics.csv"
+        if resume_metrics.exists():
+            resume_df = pd.read_csv(resume_metrics)
+            if len(resume_df) > 0:
+                resume_from_epoch = int(resume_df["epoch"].iloc[-1])
+                last_lr = float(resume_df["lr"].iloc[-1])
+                print(f"  Last epoch: {resume_from_epoch}, last LR: {last_lr:.2e}")
+                args.lr = last_lr  # use last LR as starting point
 
-    pretrain_classes = args.pretrain or []
+    model = PokemonTypeCNN(num_classes=NUM_CLASSES).to(device)
+    if resume_from_epoch > 0:
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        print(f"  Loaded weights from checkpoint")
+
+    pretrain_classes = [] if resume_from_epoch > 0 else (args.pretrain or [])
     if pretrain_classes:
         print(f"\nPhase 1: Pretraining on {pretrain_classes} only")
         print("-" * 40)
@@ -180,8 +274,8 @@ def main():
 
         pt_best = float("inf")
         for epoch in range(1, args.pretrain_epochs + 1):
-            train_loss, train_acc = train_epoch(pt_model, pt_train_loader, pt_criterion,
-                                                 pt_optimizer, device)
+            train_loss, train_acc, _ = train_epoch(pt_model, pt_train_loader, pt_criterion,
+                                                     pt_optimizer, device)
             val_loss, val_acc, _, _ = validate(pt_model, pt_val_loader, pt_criterion,
                                                 device, num_classes=len(pretrain_classes))
             print(f"  Pretrain epoch {epoch:2d}/{args.pretrain_epochs} | "
@@ -195,7 +289,10 @@ def main():
         model.features.load_state_dict(pt_model.features.state_dict())
         print(f"  Pretrain done. Best val loss: {pt_best:.4f}\n")
 
-    print("Phase 2: Full training")
+    if resume_from_epoch > 0:
+        print(f"Phase 2 (resumed): Full training from epoch {resume_from_epoch + 1}")
+    else:
+        print("Phase 2: Full training")
     print("-" * 40)
     criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -212,14 +309,31 @@ def main():
                          "val_loss", "val_acc", "lr", "elapsed_s"])
 
     per_class_path = run_dir / "per_class.csv"
-    with open(per_class_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["epoch"] + [IDX_TO_TYPE[i] for i in range(NUM_CLASSES)])
+    if resume_from_epoch > 0:
+        # When resuming, copy existing CSVs into new run dir so logs are contiguous
+        import shutil
+        resume_dir = Path(args.resume)
+        if not resume_dir.is_absolute():
+            resume_dir = project_root / args.resume
+        shutil.copy(resume_dir / "metrics.csv", metrics_path)
+        shutil.copy(resume_dir / "per_class.csv", per_class_path)
+        weights_src = resume_dir / "weights.csv"
+        if weights_src.exists():
+            shutil.copy(weights_src, run_dir / "weights.csv")
+        print(f"  Copied existing logs to {run_dir}")
+    else:
+        with open(per_class_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["epoch"] + [IDX_TO_TYPE[i] for i in range(NUM_CLASSES)])
 
-    for epoch in range(1, args.epochs + 1):
+    weights_path = run_dir / "weights.csv"
+    weight_header_written = False
+
+    start_epoch = resume_from_epoch + 1
+    for epoch in range(start_epoch, args.epochs + 1):
         t0 = time.time()
 
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss, train_acc, grad_stats = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, class_correct, class_total = validate(
             model, val_loader, criterion, device,
         )
@@ -248,8 +362,27 @@ def main():
             writer = csv.writer(f)
             writer.writerow([epoch] + per_class_accs)
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # Log weight stats
+        weight_stats = compute_weight_stats(model)
+        fieldnames = ["epoch"] + list(weight_stats.keys())
+        if not weight_header_written:
+            with open(weights_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(fieldnames)
+            weight_header_written = True
+        row = [epoch]
+        for name in weight_stats:
+            row.append(weight_stats[name]["weight_norm"])
+        with open(weights_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(row)
+
+        if val_loss < best_val_loss or (resume_from_epoch > 0 and epoch == start_epoch):
+            if epoch == start_epoch and resume_from_epoch > 0:
+                # Seed best_val_loss from the first resumed epoch
+                best_val_loss = val_loss
+            else:
+                best_val_loss = val_loss
             patience_counter = 0
             torch.save(model.state_dict(), run_dir / "model.pt")
         else:

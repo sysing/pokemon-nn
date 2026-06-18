@@ -24,6 +24,7 @@ def make_layout() -> Layout:
     layout.split_column(
         Layout(name="header", size=3),
         Layout(name="body"),
+        Layout(name="weights_row", size=10),
     )
     layout["body"].split_row(
         Layout(name="loss_acc", ratio=1),
@@ -114,11 +115,65 @@ def render(console: Console, epoch: int, total_epochs: int,
     return layout
 
 
+def short_name(name: str) -> str:
+    """Shorten param names like 'features.0.weight' → 'conv1'."""
+    mapping = {
+        "features.0.weight": "conv1",
+        "features.4.weight": "conv2",
+        "features.8.weight": "conv3",
+        "features.12.weight": "conv4",
+        "classifier.1.weight": "fc",
+    }
+    return mapping.get(name, name.split(".")[-1])
+
+
+def render_weights(weights_history: dict) -> Panel:
+    """Render per-layer weight norms as bars + sparklines."""
+    if not weights_history:
+        return Panel("Waiting for weight data...", title="Weights")
+
+    table = Table(expand=True, padding=(0, 1))
+    table.add_column("Layer", style="bold", width=8)
+    table.add_column("‖W‖₂", width=10, justify="right")
+    table.add_column("Spark")
+    table.add_column("Trend", width=6)
+
+    for name in weights_history:
+        vals = weights_history[name]
+        if not vals:
+            continue
+        latest = vals[-1]
+        spark = loss_plot(vals, width=25, color="magenta")
+        # Trend arrow
+        if len(vals) >= 2:
+            delta = latest - vals[0]
+            if abs(delta) < 0.01 * abs(vals[0]) if vals[0] != 0 else 0.01:
+                trend = "—"
+            elif delta > 0:
+                trend = f"[red]↑{delta:+.1f}[/]"
+            else:
+                trend = f"[green]↓{delta:+.1f}[/]"
+        else:
+            trend = ""
+
+        # Color based on magnitude
+        color = "cyan" if latest < 20 else "yellow" if latest < 50 else "red"
+        table.add_row(
+            short_name(name),
+            f"[{color}]{latest:.2f}[/]",
+            f"[dim magenta]{spark}[/]",
+            trend,
+        )
+
+    return Panel(table, title="Weight Norms per Layer")
+
+
 def watch(metrics_path: str, refresh: float = 2.0):
     """Live-watch a training run by polling metrics.csv."""
     console = Console()
     path = Path(metrics_path)
     per_class_path = path.parent / "per_class.csv"
+    weights_path = path.parent / "weights.csv"
 
     if not path.exists():
         console.print(f"[red]Waiting for {metrics_path}... (start training)[/]")
@@ -127,7 +182,9 @@ def watch(metrics_path: str, refresh: float = 2.0):
     train_losses, val_losses = [], []
     train_accs, val_accs = [], []
     per_class = {}
+    weights_history = {}
     last_lines = 0
+    last_weight_lines = 0
     epoch_start = None
 
     with Live(console=console, refresh_per_second=4, screen=True) as live:
@@ -174,12 +231,29 @@ def watch(metrics_path: str, refresh: float = 2.0):
             except Exception:
                 pass
 
+            # Always try to load weights (may be written after metrics)
+            try:
+                if weights_path.exists():
+                    w_df = pd.read_csv(weights_path)
+                    if len(w_df) > 0 and len(w_df) != last_weight_lines:
+                        last_weight_lines = len(w_df)
+                        for col in w_df.columns:
+                            if col == "epoch":
+                                continue
+                            if col not in weights_history:
+                                weights_history[col] = []
+                            weights_history[col].append(float(w_df[col].iloc[-1]))
+            except Exception:
+                pass
+
             live_layout = render(
                 console, epoch if last_lines else 0, total_epochs,
                 train_losses, val_losses, train_accs, val_accs,
                 elapsed if last_lines else 0, eta if last_lines else 0,
                 per_class,
             )
+            # Append weights panel
+            live_layout["weights_row"].update(render_weights(weights_history))
             live.update(live_layout)
 
             time.sleep(refresh)
