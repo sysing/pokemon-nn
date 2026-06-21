@@ -11,9 +11,10 @@ Input tensor: [4, 224, 224]
 import csv
 from pathlib import Path
 
+import numpy as np
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split, Subset
 from torchvision import transforms
 
 TYPE_TO_IDX = {
@@ -99,20 +100,33 @@ class PokemonDataset(Dataset):
 
 
 def create_dataloaders(data_dir: str, batch_size: int = 32, val_split: float = 0.2,
-                       preload: bool = False, num_workers: int = 0):
+                       preload: bool = False, num_workers: int = 0, stratify: bool = True):
     full_dataset = PokemonDataset(data_dir, transform=get_train_transform(), preload=preload)
 
     label_counts = [0] * NUM_CLASSES
-    for _, label in full_dataset.samples:
+    labels = []
+    for img_path, label in full_dataset.samples:
         label_counts[label] += 1
+        labels.append(label)
 
-    val_size = int(len(full_dataset) * val_split)
-    train_size = len(full_dataset) - val_size
+    if stratify:
+        val_size = int(len(full_dataset) * val_split)
+        from sklearn.model_selection import train_test_split
 
-    train_ds, val_ds = random_split(
-        full_dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(42),
-    )
+        indices = np.arange(len(full_dataset))
+        train_idx, val_idx = train_test_split(
+            indices, test_size=val_size, stratify=labels,
+            random_state=42,
+        )
+        train_ds = Subset(full_dataset, train_idx)
+        val_ds = Subset(full_dataset, val_idx)
+    else:
+        val_size = int(len(full_dataset) * val_split)
+        train_size = len(full_dataset) - val_size
+        train_ds, val_ds = random_split(
+            full_dataset, [train_size, val_size],
+            generator=torch.Generator().manual_seed(42),
+        )
 
     val_ds.transform = get_val_transform()
 

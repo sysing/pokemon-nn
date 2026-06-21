@@ -13,11 +13,12 @@ import shutil
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader, random_split
 
 from dataset import IDX_TO_TYPE, NUM_CLASSES, TYPE_TO_IDX, create_dataloaders, PokemonDataset
@@ -137,7 +138,7 @@ def compute_grad_stats(accum):
     return stats
 
 
-def train_epoch(model, loader, criterion, optimizer, device, scaler=None):
+def train_epoch(model, loader, criterion, optimizer, device, scaler=None, mixup_alpha=0.2):
     model.train()
     running_loss = 0.0
     correct = 0
@@ -149,23 +150,39 @@ def train_epoch(model, loader, criterion, optimizer, device, scaler=None):
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
 
+        if mixup_alpha > 0:
+            alpha = mixup_alpha
+            lam = np.random.beta(alpha, alpha) if alpha > 0 else 1.0
+            idx = torch.randperm(images.size(0), device=device)
+            images = lam * images + (1 - lam) * images[idx]
+            labels_a, labels_b = labels, labels[idx]
+
         optimizer.zero_grad()
         if use_amp:
             with torch.autocast(device_type=str(device)):
                 outputs = model(images)
-                loss = criterion(outputs, labels)
+                if mixup_alpha > 0:
+                    loss = lam * criterion(outputs, labels_a) + (1 - lam) * criterion(outputs, labels_b)
+                else:
+                    loss = criterion(outputs, labels)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
             outputs = model(images)
-            loss = criterion(outputs, labels)
+            if mixup_alpha > 0:
+                loss = lam * criterion(outputs, labels_a) + (1 - lam) * criterion(outputs, labels_b)
+            else:
+                loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
         running_loss += loss.item() * images.size(0)
         _, preds = outputs.max(1)
-        correct += preds.eq(labels).sum().item()
+        if mixup_alpha > 0:
+            correct += (lam * preds.eq(labels_a).float() + (1 - lam) * preds.eq(labels_b).float()).sum().item()
+        else:
+            correct += preds.eq(labels).sum().item()
         total += labels.size(0)
 
     grad_stats = compute_grad_stats(accum)
@@ -310,7 +327,11 @@ def main():
     criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scaler = torch.amp.GradScaler(device.type) if device.type == "mps" else None
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
+    scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
+
+    # Linear warmup
+    warmup_epochs = 3
+    num_batches = len(train_loader)
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -352,7 +373,7 @@ def main():
             model, val_loader, criterion, device,
         )
 
-        scheduler.step(val_loss)
+        scheduler.step()
         elapsed = time.time() - t0
         current_lr = optimizer.param_groups[0]["lr"]
 
