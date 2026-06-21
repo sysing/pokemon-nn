@@ -4,6 +4,8 @@ Toy neural network for classifying Pokemon card types from card images. Trains o
 
 **Goal**: given a Pokemon card image, predict the Pokemon type (Fire, Water, Grass, etc.).
 
+**[Project State & Experiment Log](https://sysing.github.io/pokemon-nn/state.html)** — full release history, per-type accuracy comparison, architecture details.
+
 ## Setup
 
 ```bash
