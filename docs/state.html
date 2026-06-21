@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pokemon-nn — Project State</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d2991d;
+    --purple: #a371f7;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem;
+  }
+  h1, h2, h3 { color: #f0f6fc; margin: 1.5rem 0 0.75rem; }
+  h1 { font-size: 1.8rem; border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; }
+  h2 { font-size: 1.3rem; }
+  h3 { font-size: 1.1rem; color: var(--accent); }
+  p { margin: 0.5rem 0; color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { background: #1c2128; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #1c2128; padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
+  pre code { background: none; padding: 0; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: #1c2128; font-weight: 600; color: #f0f6fc; white-space: nowrap; }
+  tr:hover td { background: #1a1f28; }
+
+  .badge { display: inline-block; padding: 0.15em 0.6em; border-radius: 999px; font-size: 0.8em; font-weight: 600; }
+  .badge-green { background: #1a3a24; color: var(--green); }
+  .badge-red { background: #3a1a1a; color: var(--red); }
+  .badge-yellow { background: #3a3020; color: var(--yellow); }
+  .badge-purple { background: #2a1a3a; color: var(--purple); }
+
+  .grid { display: grid; gap: 1rem; }
+  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+  .card h3 { margin-top: 0; }
+  .stat-block { text-align: center; }
+  .stat-number { font-size: 2.5rem; font-weight: 800; line-height: 1; }
+  .stat-label { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+
+  .delta-pos { color: var(--green); }
+  .delta-neg { color: var(--red); }
+
+  .version-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+  .version-row .vtag { font-weight: 600; min-width: 3.5rem; }
+
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+  .highlight { background: #1a2a1a; }
+  .highlight-red { background: #2a1a1a; }
+</style>
+</head>
+<body>
+
+<h1>pokemon-nn — Project State</h1>
+<p>
+  <a href="https://github.com/sysing/pokemon-nn">github.com/sysing/pokemon-nn</a> &nbsp;·&nbsp;
+  Toy neural network for classifying Pokemon card types from card images.
+  Trained on M4 MacBook Air (MPS). 5 releases over 2 days.
+</p>
+
+<!-- Architecture Overview -->
+<h2>Architecture</h2>
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Input</h3>
+    <pre><code>[batch, 4, 224, 224]
+
+Channel 0: Red
+Channel 1: Green
+Channel 2: Blue
+Channel 3: Luminance
+ (0.299R + 0.587G + 0.114B)</code></pre>
+    <p>200,704 float values per image. The 4th channel is the key innovation from v0.3+.</p>
+  </div>
+  <div class="card">
+    <h3>Model</h3>
+    <pre><code>Conv2d(4→32) → BN → ReLU → MaxPool
+Conv2d(32→64) → BN → ReLU → MaxPool
+Conv2d(64→128) → BN → ReLU → MaxPool
+Conv2d(128→256) → BN → ReLU → AvgPool
+Dropout(0.5) → Linear(256→10)</code></pre>
+    <p>~600K parameters. 10 output classes.</p>
+  </div>
+</div>
+
+<div class="grid grid-2" style="margin-top:1rem;">
+  <div class="card">
+    <h3>Training Config</h3>
+    <table>
+      <tr><td>Optimizer</td><td>AdamW, lr=1e-3, wd=1e-4</td></tr>
+      <tr><td>Schedule</td><td>ReduceLROnPlateau (factor=0.5, patience=3)</td></tr>
+      <tr><td>Loss</td><td>CrossEntropy (class-weighted, label_smoothing=0.1)</td></tr>
+      <tr><td>Batch</td><td>32</td></tr>
+      <tr><td>Augment</td><td>Flip, Rotate, ColorJitter</td></tr>
+      <tr><td>Seed</td><td>42 (deterministic)</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h3>Speed Optimizations</h3>
+    <table>
+      <tr><td>AMP</td><td>Mixed precision (float16 on MPS)</td></tr>
+      <tr><td>Preload</td><td>Images cached in RAM (~750MB)</td></tr>
+      <tr><td>Workers</td><td>2 DataLoader workers</td></tr>
+      <tr><td>Epoch time</td><td>~18-25s on M4</td></tr>
+      <tr><td>30 epochs</td><td>~12-15 minutes total</td></tr>
+    </table>
+  </div>
+</div>
+
+<hr>
+
+<!-- Dataset -->
+<h2>Dataset</h2>
+<div class="card">
+  <h3>934 Pokemon Cards, 10 Types</h3>
+  <table>
+    <tr>
+      <th>Type</th><th>Total</th><th>Train</th><th>Val</th>
+      <th>Color</th><th>Distinctiveness</th>
+    </tr>
+    <tr><td>Grass</td><td>100</td><td>80</td><td>20</td><td>Green</td><td>Easy</td></tr>
+    <tr><td>Dragon</td><td>100</td><td>81</td><td>19</td><td>Gold/Yellow</td><td>Medium</td></tr>
+    <tr><td>Psychic</td><td>98</td><td>74</td><td>24</td><td>Purple</td><td>Medium</td></tr>
+    <tr><td>Water</td><td>95</td><td>79</td><td>16</td><td>Blue</td><td>Easy</td></tr>
+    <tr><td>Colorless</td><td>92</td><td>77</td><td>15</td><td>Silver/Grey</td><td><strong>Hard</strong></td></tr>
+    <tr><td>Fire</td><td>92</td><td>75</td><td>17</td><td>Red/Orange</td><td>Easy</td></tr>
+    <tr><td>Fighting</td><td>91</td><td>75</td><td>16</td><td>Brown/Tan</td><td>Medium</td></tr>
+    <tr><td>Lightning</td><td>91</td><td>70</td><td>21</td><td>Yellow</td><td>Easy</td></tr>
+    <tr><td>Darkness</td><td>90</td><td>73</td><td>17</td><td>Black/Dark Purple</td><td>Medium</td></tr>
+    <tr><td>Metal</td><td>85</td><td>64</td><td>21</td><td>Silver</td><td><strong>Hardest</strong></td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>934</strong></td><td><strong>748</strong></td><td><strong>186</strong></td><td></td><td></td></tr>
+  </table>
+  <p style="margin-top:0.5rem;">
+    Sourced from <a href="https://pokemontcg.io">pokemontcg.io</a> free API.
+    Colorless and Metal are the hardest class pair — both have silver/grey backgrounds, indistinguishable by color alone.
+  </p>
+</div>
+
+<hr>
+
+<!-- Release History -->
+<h2>Release History</h2>
+
+<div class="card" style="margin-bottom:1.5rem;">
+  <h3>Performance Progression</h3>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.1">v0.1</a></span>
+    <span>Baseline — 86.5% overall, Metal 35%</span>
+  </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.2">v0.2</a></span>
+    <span>RandomGrayscale — 81.3% overall, Metal 60%</span>
+  </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.3">v0.3</a></span>
+    <span>4-channel [RGB+Gray] — <strong>94.7%</strong> overall, Metal 80%</span>
+  </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.4">v0.4</a></span>
+    <span>Dragon data fix — 91.9% overall, Metal 90.5%</span>
+  </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.5">v0.5</a></span>
+    <span>Curriculum pretrain — 91.4% overall, Metal <strong>95.2%</strong></span>
+  </div>
+</div>
+
+<!-- Per-type comparison -->
+<div class="card">
+  <h3>Per-Type Accuracy Across Versions</h3>
+  <table>
+    <tr>
+      <th>Type</th>
+      <th>v0.1</th>
+      <th>v0.2</th>
+      <th>v0.3</th>
+      <th>v0.4</th>
+      <th>v0.5</th>
+      <th>Best</th>
+    </tr>
+    <tr><td>Colorless</td><td>76.5%</td><td>70.6%</td><td>94.1%</td><td>80.0%</td><td>73.3%</td><td><span class="badge badge-purple">94.1% (v0.3)</span></td></tr>
+    <tr><td>Darkness</td><td>92.3%</td><td>100%</td><td>100%</td><td>94.1%</td><td>94.1%</td><td><span class="badge badge-green">100% (v0.2,v0.3)</span></td></tr>
+    <tr><td>Dragon</td><td>100%*</td><td>100%*</td><td>100%*</td><td>89.5%</td><td>84.2%</td><td><span class="badge badge-yellow">89.5% (v0.4)</span></td></tr>
+    <tr><td>Fighting</td><td>100%</td><td>64.7%</td><td>82.4%</td><td>87.5%</td><td>93.8%</td><td><span class="badge badge-green">100% (v0.1)</span></td></tr>
+    <tr><td>Fire</td><td>92.3%</td><td>76.9%</td><td>100%</td><td>94.1%</td><td>94.1%</td><td><span class="badge badge-green">100% (v0.3)</span></td></tr>
+    <tr><td>Grass</td><td>89.3%</td><td>85.7%</td><td>89.3%</td><td>100%</td><td>95.0%</td><td><span class="badge badge-green">100% (v0.4)</span></td></tr>
+    <tr><td>Lightning</td><td>100%</td><td>90.5%</td><td>100%</td><td>100%</td><td>81.0%</td><td><span class="badge badge-green">100% (v0.1,v0.3,v0.4)</span></td></tr>
+    <tr class="highlight"><td><strong>Metal</strong></td><td>35.0%</td><td>60.0%</td><td>80.0%</td><td>90.5%</td><td><strong>95.2%</strong></td><td><span class="badge badge-green">95.2% (v0.5)</span></td></tr>
+    <tr><td>Psychic</td><td>94.7%</td><td>84.2%</td><td>94.7%</td><td>87.5%</td><td>87.5%</td><td><span class="badge badge-purple">94.7% (v0.1,v0.3)</span></td></tr>
+    <tr><td>Water</td><td>100%</td><td>94.4%</td><td>100%</td><td>93.8%</td><td>93.8%</td><td><span class="badge badge-green">100% (v0.1,v0.3)</span></td></tr>
+  </table>
+  <p style="margin-top:0.5rem;">* Dragon v0.1–v0.3 had only 5 val samples — 100% was a statistical artifact. Real accuracy is ~89% (v0.4+ with 19 val samples).</p>
+</div>
+
+<hr>
+
+<!-- Key Findings -->
+<h2>Key Findings</h2>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h3>1. 4-Channel Input Is the Breakthrough</h3>
+    <p>
+      Stacking grayscale as a 4th channel (<code>[R,G,B,Gray]</code>) lets the model learn
+      a <strong>soft gating mechanism</strong>: attend to RGB for easy color-based types,
+      fall back to grayscale layout/texture features for ambiguous pairs.
+    </p>
+    <p>
+      v0.3 (4-channel) is the <strong>highest overall accuracy</strong> at 94.7%,
+      with Metal +45pp over baseline.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>2. Curriculum Pretrain Helps the Hardest Class</h3>
+    <p>
+      Phase 1: train on Colorless+Metal only. Phase 2: add all 10 classes.
+      Metal hits <strong>95.2%</strong> — best ever. But it shifts errors rather than
+      reducing total errors (Colorless and Lightning regressed).
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>3. Sample Size Matters</h3>
+    <p>
+      Dragon had 100% accuracy in v0.1–v0.3 with only <strong>5 validation samples</strong>.
+      Expanding to 19 val samples revealed true accuracy of ~89%. Always check sample
+      counts alongside accuracy metrics.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>4. Metal vs Colorless Is a Genuinely Hard Problem</h3>
+    <p>
+      Both types share silver/grey color palettes. Even with our best techniques
+      (4-channel + curriculum), Colorless peaks at 94% and Metal at 95%.
+      The model needs layout/textual features that a 600K CNN can barely extract.
+    </p>
+  </div>
+</div>
+
+<hr>
+
+<!-- What's Next -->
+<h2>Remaining Improvements</h2>
+
+<table>
+  <tr>
+    <th>Approach</th>
+    <th>Est. Gain</th>
+    <th>Effort</th>
+    <th>Status</th>
+  </tr>
+  <tr>
+    <td>Multi-branch RGB/Gray architecture</td>
+    <td>+1-2pp</td>
+    <td>Medium</td>
+    <td><span class="badge badge-yellow">Planned</span></td>
+  </tr>
+  <tr>
+    <td>Transfer learning (ResNet-18)</td>
+    <td>+3-5pp</td>
+    <td>Medium</td>
+    <td><span class="badge badge-yellow">Planned</span></td>
+  </tr>
+  <tr>
+    <td>More labeled data (3K+ cards)</td>
+    <td>+2-3pp</td>
+    <td>High</td>
+    <td><span class="badge badge-yellow">Planned</span></td>
+  </tr>
+  <tr>
+    <td>Cosine annealing schedule</td>
+    <td>+1pp</td>
+    <td>Low</td>
+    <td><span class="badge badge-yellow">Planned</span></td>
+  </tr>
+  <tr>
+    <td>More augmentations (RandomAffine, RandomErasing)</td>
+    <td>+1pp</td>
+    <td>Low</td>
+    <td><span class="badge badge-yellow">Planned</span></td>
+  </tr>
+</table>
+
+<p style="margin-top:1rem;">
+  Likely ceiling for 10-way Pokemon type classification from card images: <strong>~96-97%</strong>.
+  True 100% is impossible — some cards use artist-dominant art where the Pokemon's color contradicts its TCG type.
+</p>
+
+<hr>
+
+<!-- CLI Reference -->
+<h2>CLI Reference</h2>
+<div class="grid grid-2">
+  <div class="card">
+    <h3>Train</h3>
+    <pre><code>python src/train.py --run v0.6 --epochs 30 --preload --workers 2</code></pre>
+    <p>With curriculum pretrain:</p>
+    <pre><code>python src/train.py --run v0.6 --epochs 30 \
+  --pretrain Colorless Metal --pretrain-epochs 5</code></pre>
+  </div>
+  <div class="card">
+    <h3>Predict</h3>
+    <pre><code>python src/predict.py path/to/card.jpg
+python src/predict.py path/to/card.jpg \
+  --model runs/v0.5/model.pt --top-k 5</code></pre>
+  </div>
+  <div class="card">
+    <h3>Visualize (live)</h3>
+    <pre><code>python src/viz.py runs/v0.6/metrics.csv</code></pre>
+  </div>
+  <div class="card">
+    <h3>Post-hoc Plot</h3>
+    <pre><code>python src/plot.py</code></pre>
+  </div>
+</div>
+
+<hr>
+
+<!-- Data Flow -->
+<h2>Data Flow</h2>
+<div class="card">
+<pre style="background: #0d1117; border: 1px solid var(--border);">
+pokemontcg.io API
+       │
+       ▼
+  collect.py  ────►  data/images/  (934 .png/.jpg files)
+       │              data/labels.csv  (id, name, type, image_path)
+       ▼
+  dataset.py  ────►  PokemonDataset (PIL → 4-channel tensor [4,224,224])
+       │
+       ▼
+  train.py    ────►  PokemonTypeCNN (600K params, MPS/AMP)
+       │
+       ├──►  runs/{run}/model.pt        (checkpoint)
+       ├──►  runs/{run}/metrics.csv     (loss/acc/lr per epoch)
+       └──►  runs/{run}/per_class.csv   (per-type accuracy per epoch)
+               │
+       ┌───────┴────────┐
+       ▼                ▼
+  predict.py        viz.py / plot.py
+  (inference)       (visualization)</pre>
+</div>
+
+<hr>
+
+<p style="text-align:center; color: var(--muted); font-size: 0.85rem;">
+  pokemon-nn · MIT License · <a href="https://github.com/sysing/pokemon-nn">github.com/sysing/pokemon-nn</a>
+</p>
+
+</body>
+</html>
