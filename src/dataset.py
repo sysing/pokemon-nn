@@ -33,7 +33,7 @@ def _stack_gray(tensor):
 
 def get_train_transform():
     return transforms.Compose([
-        transforms.RandomResizedCrop(224, scale=(0.7, 1.0), ratio=(0.9, 1.1)),
+        transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=5),
         transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),

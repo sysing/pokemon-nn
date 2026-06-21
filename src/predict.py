@@ -36,7 +36,9 @@ def get_transform(channels: int):
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225]),
     ]
-    if channels == 4:
+    if channels == 3:
+        pass
+    elif channels == 4:
         base.append(transforms.Lambda(_stack_gray))
         base.append(transforms.Normalize(mean=[0, 0, 0, 0.5],
                                          std=[1, 1, 1, 0.225]))
