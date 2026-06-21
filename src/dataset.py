@@ -59,10 +59,12 @@ def get_val_transform():
 
 
 class PokemonDataset(Dataset):
-    def __init__(self, data_dir: str, transform=None):
+    def __init__(self, data_dir: str, transform=None, preload: bool = False):
         self.data_dir = Path(data_dir)
         self.transform = transform
         self.samples = []
+        self.preload = preload
+        self._cache = {}
 
         labels_path = self.data_dir / "labels.csv"
         with open(labels_path, newline="") as f:
@@ -72,19 +74,33 @@ class PokemonDataset(Dataset):
                 if img_path.exists():
                     self.samples.append((str(img_path), TYPE_TO_IDX[row["type"]]))
 
+        if preload:
+            from tqdm import tqdm
+            print(f"Preloading {len(self.samples)} images into RAM...")
+            for img_path, label in tqdm(self.samples, unit="img"):
+                img = Image.open(img_path).convert("RGB")
+                if self.transform:
+                    img = self.transform(img)
+                self._cache[img_path] = img
+            print("Done.")
+
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
         img_path, label = self.samples[idx]
-        image = Image.open(img_path).convert("RGB")
-        if self.transform:
-            image = self.transform(image)
+        if self.preload:
+            image = self._cache[img_path]
+        else:
+            image = Image.open(img_path).convert("RGB")
+            if self.transform:
+                image = self.transform(image)
         return image, label
 
 
-def create_dataloaders(data_dir: str, batch_size: int = 32, val_split: float = 0.2):
-    full_dataset = PokemonDataset(data_dir, transform=get_train_transform())
+def create_dataloaders(data_dir: str, batch_size: int = 32, val_split: float = 0.2,
+                       preload: bool = False, num_workers: int = 0):
+    full_dataset = PokemonDataset(data_dir, transform=get_train_transform(), preload=preload)
 
     label_counts = [0] * NUM_CLASSES
     for _, label in full_dataset.samples:
@@ -101,8 +117,8 @@ def create_dataloaders(data_dir: str, batch_size: int = 32, val_split: float = 0
     val_ds.transform = get_val_transform()
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
-                              num_workers=0, pin_memory=False)
+                              num_workers=num_workers, pin_memory=False)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
-                            num_workers=0, pin_memory=False)
+                            num_workers=num_workers, pin_memory=False)
 
     return train_loader, val_loader, label_counts

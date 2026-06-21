@@ -137,11 +137,12 @@ def compute_grad_stats(accum):
     return stats
 
 
-def train_epoch(model, loader, criterion, optimizer, device):
+def train_epoch(model, loader, criterion, optimizer, device, scaler=None):
     model.train()
     running_loss = 0.0
     correct = 0
     total = 0
+    use_amp = scaler is not None
 
     accum, handles = _setup_grad_hooks(model)
 
@@ -149,10 +150,18 @@ def train_epoch(model, loader, criterion, optimizer, device):
         images, labels = images.to(device), labels.to(device)
 
         optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+        if use_amp:
+            with torch.autocast(device_type=str(device)):
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
         running_loss += loss.item() * images.size(0)
         _, preds = outputs.max(1)
@@ -208,6 +217,8 @@ def main():
                         help="Resume from a run directory (e.g. runs/v0.5-rcrop)")
     parser.add_argument("--resume-epochs", type=int, default=15,
                         help="Additional epochs when resuming")
+    parser.add_argument("--preload", action="store_true", help="Preload images into RAM")
+    parser.add_argument("--workers", type=int, default=0, help="DataLoader workers")
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -224,6 +235,7 @@ def main():
 
     train_loader, val_loader, label_counts = create_dataloaders(
         data_dir, batch_size=args.batch_size, val_split=0.2,
+        preload=args.preload, num_workers=args.workers,
     )
     print(f"Train samples: {len(train_loader.dataset)}")
     print(f"Val samples:   {len(val_loader.dataset)}")
@@ -271,11 +283,12 @@ def main():
         pt_model.features.load_state_dict(model.features.state_dict())
         pt_criterion = nn.CrossEntropyLoss()
         pt_optimizer = AdamW(pt_model.parameters(), lr=args.lr, weight_decay=1e-4)
+        pt_scaler = torch.amp.GradScaler(device.type) if device.type == "mps" else None
 
         pt_best = float("inf")
         for epoch in range(1, args.pretrain_epochs + 1):
             train_loss, train_acc, _ = train_epoch(pt_model, pt_train_loader, pt_criterion,
-                                                     pt_optimizer, device)
+                                                     pt_optimizer, device, pt_scaler)
             val_loss, val_acc, _, _ = validate(pt_model, pt_val_loader, pt_criterion,
                                                 device, num_classes=len(pretrain_classes))
             print(f"  Pretrain epoch {epoch:2d}/{args.pretrain_epochs} | "
@@ -296,6 +309,7 @@ def main():
     print("-" * 40)
     criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scaler = torch.amp.GradScaler(device.type) if device.type == "mps" else None
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
 
     best_val_loss = float("inf")
@@ -333,7 +347,7 @@ def main():
     for epoch in range(start_epoch, args.epochs + 1):
         t0 = time.time()
 
-        train_loss, train_acc, grad_stats = train_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss, train_acc, grad_stats = train_epoch(model, train_loader, criterion, optimizer, device, scaler)
         val_loss, val_acc, class_correct, class_total = validate(
             model, val_loader, criterion, device,
         )
