@@ -82,7 +82,7 @@
 <p>
   <a href="https://github.com/sysing/pokemon-nn">github.com/sysing/pokemon-nn</a> &nbsp;·&nbsp;
   Toy neural network for classifying Pokemon card types from card images.
-  Trained on M4 MacBook Air (MPS). 5 releases over 2 days.
+  Trained on M4 MacBook Air (MPS). 8 releases over 3 days.
 </p>
 
 <!-- Architecture Overview -->
@@ -115,10 +115,11 @@ Dropout(0.5) → Linear(256→10)</code></pre>
     <h3>Training Config</h3>
     <table>
       <tr><td>Optimizer</td><td>AdamW, lr=1e-3, wd=1e-4</td></tr>
-      <tr><td>Schedule</td><td>ReduceLROnPlateau (factor=0.5, patience=3)</td></tr>
-      <tr><td>Loss</td><td>CrossEntropy (class-weighted, label_smoothing=0.1)</td></tr>
+      <tr><td>Schedule</td><td>CosineAnnealingLR + linear warmup</td></tr>
+      <tr><td>Loss</td><td>CrossEntropy (class-weighted, label_smoothing=0.1, MixUp α=0.2)</td></tr>
       <tr><td>Batch</td><td>32</td></tr>
-      <tr><td>Augment</td><td>Flip, Rotate, ColorJitter</td></tr>
+      <tr><td>Augment</td><td>Flip, Rotate, ColorJitter, MixUp</td></tr>
+      <tr><td>Split</td><td>Stratified 80/20 (scikit-learn)</td></tr>
       <tr><td>Seed</td><td>42 (deterministic)</td></tr>
     </table>
   </div>
@@ -146,15 +147,15 @@ Dropout(0.5) → Linear(256→10)</code></pre>
       <th>Color</th><th>Distinctiveness</th>
     </tr>
     <tr><td>Grass</td><td>100</td><td>80</td><td>20</td><td>Green</td><td>Easy</td></tr>
-    <tr><td>Dragon</td><td>100</td><td>81</td><td>19</td><td>Gold/Yellow</td><td>Medium</td></tr>
-    <tr><td>Psychic</td><td>98</td><td>74</td><td>24</td><td>Purple</td><td>Medium</td></tr>
-    <tr><td>Water</td><td>95</td><td>79</td><td>16</td><td>Blue</td><td>Easy</td></tr>
-    <tr><td>Colorless</td><td>92</td><td>77</td><td>15</td><td>Silver/Grey</td><td><strong>Hard</strong></td></tr>
-    <tr><td>Fire</td><td>92</td><td>75</td><td>17</td><td>Red/Orange</td><td>Easy</td></tr>
-    <tr><td>Fighting</td><td>91</td><td>75</td><td>16</td><td>Brown/Tan</td><td>Medium</td></tr>
-    <tr><td>Lightning</td><td>91</td><td>70</td><td>21</td><td>Yellow</td><td>Easy</td></tr>
-    <tr><td>Darkness</td><td>90</td><td>73</td><td>17</td><td>Black/Dark Purple</td><td>Medium</td></tr>
-    <tr><td>Metal</td><td>85</td><td>64</td><td>21</td><td>Silver</td><td><strong>Hardest</strong></td></tr>
+    <tr><td>Dragon</td><td>100</td><td>80</td><td>20</td><td>Gold/Yellow</td><td>Medium</td></tr>
+    <tr><td>Psychic</td><td>98</td><td>78</td><td>20</td><td>Purple</td><td>Medium</td></tr>
+    <tr><td>Water</td><td>95</td><td>76</td><td>19</td><td>Blue</td><td>Easy</td></tr>
+    <tr><td>Colorless</td><td>92</td><td>74</td><td>18</td><td>Silver/Grey</td><td><strong>Hard</strong></td></tr>
+    <tr><td>Fire</td><td>92</td><td>74</td><td>18</td><td>Red/Orange</td><td>Easy</td></tr>
+    <tr><td>Fighting</td><td>91</td><td>73</td><td>18</td><td>Brown/Tan</td><td>Medium</td></tr>
+    <tr><td>Lightning</td><td>91</td><td>73</td><td>18</td><td>Yellow</td><td>Easy</td></tr>
+    <tr><td>Darkness</td><td>90</td><td>72</td><td>18</td><td>Black/Dark Purple</td><td>Medium</td></tr>
+    <tr><td>Metal</td><td>85</td><td>68</td><td>17</td><td>Silver</td><td><strong>Hardest</strong></td></tr>
     <tr><td><strong>Total</strong></td><td><strong>934</strong></td><td><strong>748</strong></td><td><strong>186</strong></td><td></td><td></td></tr>
   </table>
   <p style="margin-top:0.5rem;">
@@ -190,6 +191,18 @@ Dropout(0.5) → Linear(256→10)</code></pre>
     <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.5">v0.5</a></span>
     <span>Curriculum pretrain — 91.4% overall, Metal <strong>95.2%</strong></span>
   </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.6">v0.6</a></span>
+    <span>Otsu mask (5-channel) — regressed, removed</span>
+  </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.7">v0.7</a></span>
+    <span>Spatial attention — 91.4% overall, Metal 81% (no gain)</span>
+  </div>
+  <div class="version-row">
+    <span class="vtag"><a href="https://github.com/sysing/pokemon-nn/releases/tag/v0.8">v0.8</a></span>
+    <span>CosineLR + Stratified + MixUp — <strong>93.5%</strong> overall, most reliable metrics</span>
+  </div>
 </div>
 
 <!-- Per-type comparison -->
@@ -199,22 +212,21 @@ Dropout(0.5) → Linear(256→10)</code></pre>
     <tr>
       <th>Type</th>
       <th>v0.1</th>
-      <th>v0.2</th>
       <th>v0.3</th>
-      <th>v0.4</th>
       <th>v0.5</th>
+      <th>v0.8</th>
       <th>Best</th>
     </tr>
-    <tr><td>Colorless</td><td>76.5%</td><td>70.6%</td><td>94.1%</td><td>80.0%</td><td>73.3%</td><td><span class="badge badge-purple">94.1% (v0.3)</span></td></tr>
-    <tr><td>Darkness</td><td>92.3%</td><td>100%</td><td>100%</td><td>94.1%</td><td>94.1%</td><td><span class="badge badge-green">100% (v0.2,v0.3)</span></td></tr>
-    <tr><td>Dragon</td><td>100%*</td><td>100%*</td><td>100%*</td><td>89.5%</td><td>84.2%</td><td><span class="badge badge-yellow">89.5% (v0.4)</span></td></tr>
-    <tr><td>Fighting</td><td>100%</td><td>64.7%</td><td>82.4%</td><td>87.5%</td><td>93.8%</td><td><span class="badge badge-green">100% (v0.1)</span></td></tr>
-    <tr><td>Fire</td><td>92.3%</td><td>76.9%</td><td>100%</td><td>94.1%</td><td>94.1%</td><td><span class="badge badge-green">100% (v0.3)</span></td></tr>
-    <tr><td>Grass</td><td>89.3%</td><td>85.7%</td><td>89.3%</td><td>100%</td><td>95.0%</td><td><span class="badge badge-green">100% (v0.4)</span></td></tr>
-    <tr><td>Lightning</td><td>100%</td><td>90.5%</td><td>100%</td><td>100%</td><td>81.0%</td><td><span class="badge badge-green">100% (v0.1,v0.3,v0.4)</span></td></tr>
-    <tr class="highlight"><td><strong>Metal</strong></td><td>35.0%</td><td>60.0%</td><td>80.0%</td><td>90.5%</td><td><strong>95.2%</strong></td><td><span class="badge badge-green">95.2% (v0.5)</span></td></tr>
-    <tr><td>Psychic</td><td>94.7%</td><td>84.2%</td><td>94.7%</td><td>87.5%</td><td>87.5%</td><td><span class="badge badge-purple">94.7% (v0.1,v0.3)</span></td></tr>
-    <tr><td>Water</td><td>100%</td><td>94.4%</td><td>100%</td><td>93.8%</td><td>93.8%</td><td><span class="badge badge-green">100% (v0.1,v0.3)</span></td></tr>
+    <tr><td>Colorless</td><td>76.5%</td><td>94.1%</td><td>73.3%</td><td><strong>94.4%</strong></td><td><span class="badge badge-green">94.4% (v0.8)</span></td></tr>
+    <tr><td>Darkness</td><td>92.3%</td><td>100%</td><td>94.1%</td><td>94.4%</td><td><span class="badge badge-green">100% (v0.3)</span></td></tr>
+    <tr><td>Dragon</td><td>100%*</td><td>100%*</td><td>84.2%</td><td><strong>100%</strong></td><td><span class="badge badge-green">100% (v0.8)</span></td></tr>
+    <tr><td>Fighting</td><td>100%</td><td>82.4%</td><td>93.8%</td><td>83.3%</td><td><span class="badge badge-green">100% (v0.1)</span></td></tr>
+    <tr><td>Fire</td><td>92.3%</td><td>100%</td><td>94.1%</td><td><strong>100%</strong></td><td><span class="badge badge-green">100% (v0.3,v0.8)</span></td></tr>
+    <tr><td>Grass</td><td>89.3%</td><td>89.3%</td><td>95.0%</td><td>90.0%</td><td><span class="badge badge-green">100% (v0.4)</span></td></tr>
+    <tr><td>Lightning</td><td>100%</td><td>100%</td><td>81.0%</td><td>94.4%</td><td><span class="badge badge-green">100% (v0.1,v0.3,v0.4)</span></td></tr>
+    <tr class="highlight"><td><strong>Metal</strong></td><td>35.0%</td><td>80.0%</td><td><strong>95.2%</strong></td><td>82.4%</td><td><span class="badge badge-green">95.2% (v0.5)</span></td></tr>
+    <tr><td>Psychic</td><td>94.7%</td><td>94.7%</td><td>87.5%</td><td><strong>100%</strong></td><td><span class="badge badge-green">100% (v0.8)</span></td></tr>
+    <tr><td>Water</td><td>100%</td><td>100%</td><td>93.8%</td><td>94.7%</td><td><span class="badge badge-green">100% (v0.1,v0.3)</span></td></tr>
   </table>
   <p style="margin-top:0.5rem;">* Dragon v0.1–v0.3 had only 5 val samples — 100% was a statistical artifact. Real accuracy is ~89% (v0.4+ with 19 val samples).</p>
 </div>
@@ -257,11 +269,12 @@ Dropout(0.5) → Linear(256→10)</code></pre>
   </div>
 
   <div class="card">
-    <h3>4. Metal vs Colorless Is a Genuinely Hard Problem</h3>
+    <h3>4. MixUp + CosineLR + Stratified = Most Reliable Baseline</h3>
     <p>
-      Both types share silver/grey color palettes. Even with our best techniques
-      (4-channel + curriculum), Colorless peaks at 94% and Metal at 95%.
-      The model needs layout/textual features that a 600K CNN can barely extract.
+      v0.8 combines three techniques that compound: <strong>CosineAnnealingLR</strong> plans a smooth LR curve instead of reactive drops,
+      <strong>stratified split</strong> ensures every class has 17-20 val samples (no more 5-sample illusions),
+      and <strong>MixUp</strong> (α=0.2) trains on blended image pairs for smooth decision boundaries.
+      Result: 93.5% overall with balanced metrics.
     </p>
   </div>
 </div>
@@ -300,7 +313,7 @@ Dropout(0.5) → Linear(256→10)</code></pre>
     <td>Cosine annealing schedule</td>
     <td>+1pp</td>
     <td>Low</td>
-    <td><span class="badge badge-yellow">Planned</span></td>
+    <td><span class="badge badge-green">Done (v0.8)</span></td>
   </tr>
   <tr>
     <td>More augmentations (RandomAffine, RandomErasing)</td>
@@ -331,7 +344,7 @@ Dropout(0.5) → Linear(256→10)</code></pre>
     <h3>Predict</h3>
     <pre><code>python src/predict.py path/to/card.jpg
 python src/predict.py path/to/card.jpg \
-  --model runs/v0.5/model.pt --top-k 5</code></pre>
+  --model runs/v0.8/model.pt --top-k 5</code></pre>
   </div>
   <div class="card">
     <h3>Visualize (live)</h3>
@@ -356,6 +369,7 @@ pokemontcg.io API
        │              data/labels.csv  (id, name, type, image_path)
        ▼
   dataset.py  ────►  PokemonDataset (PIL → 4-channel tensor [4,224,224])
+       │              stratified 80/20 split (scikit-learn)
        │
        ▼
   train.py    ────►  PokemonTypeCNN (600K params, MPS/AMP)
